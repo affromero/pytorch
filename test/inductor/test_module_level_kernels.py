@@ -15,7 +15,6 @@ from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwis
 from torch._inductor import CompiledArtifact, config, load_from_python
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import PyCodeCache
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
@@ -112,15 +111,6 @@ def _compiled_in_this_process(*args, **kwargs):
 
 
 class TestModuleLevelKernels(TestCase):
-    def setUp(self):
-        super().setUp()
-        # Module-level kernels are not the default yet.
-        patcher = mock.patch.object(
-            PythonWrapperCodegen, "defines_triton_kernels_as_code", lambda self: True
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     @requires_cuda_and_triton
     @parametrize("fn", [_softmax, _cond_softmax])
     def test_kernels_are_defined_at_module_level(self, fn):
@@ -454,14 +444,6 @@ class TestModuleLevelKernels(TestCase):
         x = torch.randn(64, 128, device="cuda")
         result, code = _code_for(_softmax, x)
         self.assertEqual(load_from_python(code)([x])[0], result)
-
-
-class TestDefaultWrapper(TestCase):
-    @requires_cuda_and_triton
-    def test_default_wrapper_still_uses_async_compile(self):
-        x = torch.randn(64, 128, device="cuda")
-        _, code = _code_for(_softmax, x)
-        self.assertIn("async_compile.triton(", code)
 
 
 instantiate_parametrized_tests(TestModuleLevelKernels)
