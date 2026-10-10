@@ -11,6 +11,7 @@ from unittest import mock
 import torch
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import CompiledArtifact, config
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import PyCodeCache
@@ -431,6 +432,21 @@ class TestModuleLevelKernels(TestCase):
             ns = {"__file__": path, "__name__": "_module_level_kernels"}
             exec(compile(code, path, "exec"), ns)
             self.assertEqual(tuple(ns["call"]([x])), expected)
+
+    @requires_cuda_and_triton
+    def test_kernel_source_with_backslashes(self):
+        # Inline asm escapes its newlines for the string form's ''' literal.
+        asm = "{\n.reg .pred p;\nsetp.ge.s32 p, $1, $2;\nselp.u32 $0, 1, 0, p;\n}"
+
+        def fn(x, y):
+            return inline_asm_elementwise(
+                x, y, asm_str=asm, constraints="=r,r,r", dtype=torch.int32
+            )
+
+        x = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
+        y = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
+        result, _ = _code_for(fn, x, y)
+        self.assertEqual(result, (x >= y).int())
 
 
 class TestDefaultWrapper(TestCase):
