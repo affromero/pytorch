@@ -668,19 +668,24 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
         if args:
             other = args[0]
-            if isinstance(other, ConstDictVariable):
-                # NB - Guard on all the keys of the other dict to ensure
-                # correctness.
-                other.install_dict_keys_match_guard()
-                self.items.update(other.items)
-            elif isinstance(other, FrozenDictVariable):
+            if isinstance(other, (ConstDictVariable, FrozenDictVariable)) and (
+                other.python_type().__iter__ is dict.__iter__
+                or (
+                    torch._has_frozendict
+                    and other.python_type().__iter__ is torch._frozendict.__iter__
+                )
+            ):
+                if isinstance(other, ConstDictVariable):
+                    other.install_dict_keys_match_guard()
                 self.items.update(other.items)
             elif (
                 isinstance(
                     other,
                     (
                         variables.UserDefinedObjectVariable,
+                        ConstDictVariable,
                         MappingProxyVariable,
+                        FrozenDictVariable,
                     ),
                 )
                 and other.call_obj_hasattr(tx, "keys").as_python_constant()
@@ -1205,6 +1210,10 @@ class FrozenDictVariable(VariableTracker):
     ) -> VariableTracker:
         hashed = self._lookup_key(tx, key)
         if hashed not in self.items:
+            if isinstance(self, variables.UserDefinedObjectVariable):
+                result = self._maybe_call_special(tx, "__missing__", [key])
+                if result is not None:
+                    return result
             raise_observed_exception(KeyError, tx, args=[key])
         return self.items[hashed]
 
@@ -1364,7 +1373,10 @@ class FrozenDictVariable(VariableTracker):
     ) -> VariableTracker:
         if type(self) is FrozenDictVariable:
             return self
-        return FrozenDictVariable(self.items)
+        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        if self.items:
+            storage.dict_update(tx, [self], {})
+        return FrozenDictVariable(storage.items)
 
     def frozen_fromkeys(
         self,
@@ -1372,7 +1384,10 @@ class FrozenDictVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return variables.FrozenDictBuiltinVariable().fromkeys(tx, args, kwargs)
+        cls = None
+        if isinstance(self, variables.UserDefinedObjectVariable):
+            cls = VariableTracker.build(tx, self.python_type(), self.cls_source)
+        return variables.FrozenDictBuiltinVariable().fromkeys(tx, args, kwargs, cls=cls)
 
     tp_methods = {
         "copy": Method(frozen_copy),
@@ -1570,6 +1585,16 @@ class DictViewVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.kv is None:
             raise AssertionError("kv must not be None for reconstruct")
+        if isinstance(self.dv_dict, FrozenDictVariable):
+
+            def load_method() -> None:
+                codegen.load_import_from("builtins", "frozendict")
+                codegen.append_output(codegen.create_load_attr(self.kv))
+
+            codegen.add_push_null(load_method)
+            codegen(self.dv_dict)
+            codegen.extend_output(create_call_function(1, False))
+            return
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
