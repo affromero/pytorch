@@ -315,6 +315,16 @@ class TestModuleLevelKernels(TestCase):
         # -c prints a line per config, which needs each kernel precompiled.
         self.assertGreaterEqual(out.decode().count("GB/s"), len(defs), out.decode())
 
+    @requires_cuda_and_triton
+    @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
+    def test_wrappers_that_keep_kernels_as_strings(self, wrapper):
+        # Both consume each kernel's async_compile.triton(...) source themselves.
+        x = torch.randn(64, 128, device="cuda")
+        torch._dynamo.reset()
+        with config.patch({wrapper: True}):
+            result = torch.compile(_softmax)(x)
+        self.assertEqual(result, _softmax(x))
+
 
 class TestDefaultWrapper(TestCase):
     @requires_cuda_and_triton
