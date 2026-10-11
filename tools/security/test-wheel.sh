@@ -2,7 +2,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates libgomp1 binutils
+apt-get install -y --no-install-recommends ca-certificates libgomp1 binutils build-essential
 rm -rf /var/lib/apt/lists/*
 mkdir /wheel-test
 cd /wheel-test

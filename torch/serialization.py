@@ -1446,15 +1446,19 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         assert typename == 'storage', \
             f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
+        if type(numel) is not int or numel < 0:
+            raise RuntimeError("Invalid storage element count")
         if storage_type is torch.UntypedStorage:
             dtype = torch.uint8
         else:
             dtype = storage_type.dtype
 
+        nbytes = numel * torch._utils._element_size(dtype)
+        if zip_file.get_record_size(f'data/{key}') != nbytes:
+            raise RuntimeError("record size does not match expected storage size")
         if key in loaded_storages:
             typed_storage = loaded_storages[key]
         else:
-            nbytes = numel * torch._utils._element_size(dtype)
             typed_storage = load_tensor(dtype, nbytes, key, _maybe_decode_ascii(location))
 
         return typed_storage

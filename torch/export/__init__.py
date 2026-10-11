@@ -248,6 +248,7 @@ def load(
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
+    trusted: bool = False,
 ) -> ExportedProgram:
     """
 
@@ -257,6 +258,10 @@ def load(
 
     Loads an :class:`ExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
+
+    Export archives contain executable model code, pickle data, and symbolic
+    expressions. Authenticate the entire archive before passing ``trusted=True``.
+    Loading an untrusted archive is rejected before any archive contents are read.
 
     Args:
         ep (ExportedProgram): The exported program to save.
@@ -271,6 +276,9 @@ def load(
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
 
+        trusted (bool): Explicitly permit executable deserialization of an
+         authenticated archive. Defaults to False.
+
     Returns:
         An :class:`ExportedProgram` object
 
@@ -280,24 +288,27 @@ def load(
         import io
 
         # Load ExportedProgram from file
-        ep = torch.export.load('exported_program.pt2')
+        ep = torch.export.load('exported_program.pt2', trusted=True)
 
         # Load ExportedProgram from io.BytesIO object
         with open('exported_program.pt2', 'rb') as f:
             buffer = io.BytesIO(f.read())
         buffer.seek(0)
-        ep = torch.export.load(buffer)
+        ep = torch.export.load(buffer, trusted=True)
 
         # Load with extra files.
         extra_files = {'foo.txt': ''}  # values will be replaced with data
-        ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
+        ep = torch.export.load('exported_program.pt2', extra_files=extra_files, trusted=True)
         print(extra_files['foo.txt'])
         print(ep(torch.randn(5)))
     """
+    if trusted is not True:
+        raise ValueError("Export archives require explicit trusted=True after authenticating their source")
     from torch._export import load
 
     return load(
-        f, extra_files=extra_files, expected_opset_version=expected_opset_version
+        f, extra_files=extra_files, expected_opset_version=expected_opset_version,
+        trusted=trusted,
     )
 
 

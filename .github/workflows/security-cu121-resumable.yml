@@ -3,13 +3,30 @@ on:
   push:
     branches: [security/cu121-backports]
   workflow_dispatch:
+    inputs:
+      checkpoint:
+        description: Verified checkpoint artifact from this repository
+        type: string
+        default: ''
+      checkpoint_run_id:
+        description: Run that produced the checkpoint
+        type: string
+        default: ''
+      checkpoint_source:
+        description: Full source revision recorded in the checkpoint
+        type: string
+        default: ''
 permissions:
   contents: read
+  actions: read
 jobs:
   stage-1:
     uses: ./.github/workflows/security-cu121-stage.yml
     with:
       stage: 1
+      checkpoint: ${{ inputs.checkpoint || '' }}
+      checkpoint_run_id: ${{ inputs.checkpoint_run_id || '' }}
+      checkpoint_source: ${{ inputs.checkpoint_source || '' }}
   stage-2:
     needs: stage-1
     uses: ./.github/workflows/security-cu121-stage.yml

@@ -1577,6 +1577,11 @@ void initJITBindings(PyObject* module) {
           "get_all_records",
           [](PyTorchStreamReader& self) { return self.getAllRecords(); })
       .def(
+          "get_record_size",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordSize(key);
+          })
+      .def(
           "get_record_offset",
           [](PyTorchStreamReader& self, const std::string& key) {
             return self.getRecordOffset(key);

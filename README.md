@@ -44,7 +44,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 
 ## CUDA 12.1 security maintenance
 
-This fork retains the PyTorch 2.3.0 API and CUDA 12.1 ABI used by Splattie.
+This fork retains the PyTorch 2.3.0 stack and CUDA 12.1 ABI used by Splattie.
 Its wheel version is `2.3.0+cu121.security1`, identifying this backport of
 upstream security fixes.
 
@@ -77,6 +77,35 @@ Additional fixes validate profiler handles and futures synchronously
 serialization (GHSA-x3gm-94wq-g975), and validate archive storage sizes before
 constructing native tensor storage.
 
+Archive storage validation also covers memory-mapped loading, cached aliases,
+and fake tensors (GHSA-63cw-57p8-fm3p). Restricted loading rejects TorchScript
+archives. Authenticated TorchScript models remain available through
+`torch.jit.load`.
+
+Compiler backports correct modular-index positivity
+(`233227aea57ae0715b76bdd05a7e0f1a1630972d`), preserve factory output strides
+(`c849ccbd342b6067d19d5805c6614a21a4f0b49f` and
+`41da06ca15a292b9173d7dd33b8a9671d3bc1ea8`), and apply the existing unsupported
+sparse-tensor policy during attribute access
+(`225742838bcbf4656a90010257062188f7fcae82`). Namedtuple slicing returns plain
+tuples, and FX renders Python keywords through `getattr`, preserving random
+operator capture. CPU regressions cover these operations and their results.
+
+Both `torch.export.load` and `torch._export.load` now require explicit
+`trusted=True` before opening an archive (PYSEC-2026-139). This is a deliberate
+security compatibility change. Authenticate the complete archive first.
+Exported programs contain executable code and symbolic expressions, so
+restricted pickle loading alone cannot make arbitrary exports safe. Trusted
+export round trips preserve parameters, buffers, inference, and extra files.
+
+Some advisory records describe features or trust boundaries rather than an
+applicable 2.3 patch. PYSEC-2025-207 and PYSEC-2025-208 target newer compiler
+implementations absent from 2.3. PYSEC-2025-206 describes an out-of-range
+floating-point conversion that `Tensor.to` defines as undefined; upstream
+issue 151510 remains open. PYSEC-2024-259 is disputed and concerns trusted RPC
+participants. Splattie starts no RPC service. This fork preserves the upstream
+requirement that distributed participants and executable models are trusted.
+
 The security workflow compiles all CUDA architectures configured by Splattie
 and runs restricted-loading, quantized-inference and native CPU regressions
 against the resulting wheel. A separate runtime container verifies package
@@ -89,6 +118,9 @@ It preserves the source timestamps, Ninja state, and complete Docker build
 environment across up to four stages. Compiler errors fail the build.
 The final gate requires the wheel to pass native tests and verification in a
 clean runtime container, then checks the uploaded artifact's SHA-256.
+Cross-revision resumes authenticate the original workflow, successful stage,
+artifact digest, and ancestor revision before applying the reviewed source
+delta. Submodule changes require a fresh build.
 
 ## More About PyTorch
 

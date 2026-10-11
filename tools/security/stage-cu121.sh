@@ -7,16 +7,30 @@ container_name="torch-security-build-$BUILD_STAGE"
 base_image='nvidia/cuda:12.1.1-devel-ubuntu22.04@sha256:327c9e046fbf662275be0934742f7e5412f9b24402ee90bf4d649c1a21707912'
 
 if [[ -n "$CHECKPOINT_ARTIFACT" ]]; then
+  checkpoint_revision="${CHECKPOINT_SOURCE_REVISION:-$GITHUB_SHA}"
+  git merge-base --is-ancestor "$checkpoint_revision" "$GITHUB_SHA"
+  if git diff --raw "$checkpoint_revision" "$GITHUB_SHA" | grep -E '^:160000 |^:[0-9]{6} 160000 ' > /dev/null; then
+    printf '%s\n' 'Cross-revision checkpoints cannot change submodule revisions.' >&2
+    exit 1
+  fi
+  git diff --binary --no-renames "$checkpoint_revision" "$GITHUB_SHA" > "$RUNNER_TEMP/torch-checkpoint-update.patch"
   (
     cd "$checkpoint_dir"
     sha256sum --check SHA256SUMS
-    test "$(cat source-revision.txt)" = "$GITHUB_SHA"
+    test "$(cat source-revision.txt)" = "$checkpoint_revision"
   )
   available=$(df --output=avail -B1 "$PWD" | tail -1)
   required=$(cat "$checkpoint_dir/uncompressed-bytes")
   test "$available" -gt "$((required + 5 * 1024 * 1024 * 1024))"
   zstd --decompress --stdout "$checkpoint_dir/image.tar.zst" | docker load
+  docker tag "torch-security-stage:$checkpoint_revision" "$image_tag"
+  git restore --source="$checkpoint_revision" --worktree -- .
   zstd --decompress --stdout "$checkpoint_dir/source.tar.zst" | sudo tar --extract --preserve-permissions -C "$PWD"
+  if [[ -s "$RUNNER_TEMP/torch-checkpoint-update.patch" ]]; then
+    sudo git -c safe.directory="$PWD" apply --check "$RUNNER_TEMP/torch-checkpoint-update.patch"
+    sudo git -c safe.directory="$PWD" apply "$RUNNER_TEMP/torch-checkpoint-update.patch"
+  fi
+  git diff --exit-code HEAD -- .
   rm "$checkpoint_dir/image.tar.zst" "$checkpoint_dir/source.tar.zst"
 else
   docker pull "$base_image"

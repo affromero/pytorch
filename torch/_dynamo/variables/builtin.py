@@ -13,6 +13,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch._subclasses.meta_utils import is_sparse_any
 
 from .. import config, polyfill, variables
 from ..exc import (
@@ -1273,6 +1274,10 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if isinstance(obj, TensorVariable):
+                fake_value = obj.proxy.node.meta.get("example_value")
+                if isinstance(fake_value, torch.Tensor) and is_sparse_any(fake_value):
+                    unimplemented("torch.compile does not support sparse Tensors")
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:

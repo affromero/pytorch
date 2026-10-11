@@ -242,8 +242,8 @@ def _format_target(base: str, target: str) -> str:
     elems = target.split('.')
     r = base
     for e in elems:
-        if not e.isidentifier():
-            r = f'getattr({r}, "{e}")'
+        if not e.isidentifier() or keyword.iskeyword(e):
+            r = f'getattr({r}, {e!r})'
         else:
             r = f'{r}.{e}'
     return r
@@ -400,7 +400,8 @@ class CodeGen:
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
-                return _get_qualified_name(obj)
+                base, _, target = _get_qualified_name(obj).partition('.')
+                return _format_target(base, target) if target else base
 
             # normalize the name hint to get a proper identifier
             global_name = namespace.create_name(name_hint, obj)

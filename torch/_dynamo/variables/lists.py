@@ -86,6 +86,12 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
+            if isinstance(self, NamedTupleVariable):
+                return TupleVariable(
+                    self.items[index],
+                    source=GetItemSource(self.source, index) if self.source else None,
+                    mutable_local=MutableLocal() if self.mutable_local else None,
+                )
             if self.source is not None:
                 return self.clone(
                     items=self.items[index],

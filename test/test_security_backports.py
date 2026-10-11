@@ -2,6 +2,7 @@ import asyncio
 import io
 import os
 import pickle
+import pickletools
 import subprocess
 import sys
 import tarfile
@@ -37,6 +38,14 @@ class ClearScope:
 class ListAssignment:
     def __reduce__(self):
         return list, ([0],), None, None, iter([(0, 17)])
+
+
+class ExecutableState:
+    def __init__(self, marker):
+        self.marker = marker
+
+    def __reduce__(self):
+        return eval, (f"__import__('pathlib').Path({self.marker!r}).write_text('executed')",)
 
 
 def checkpoint(value, **kwargs):
@@ -274,9 +283,50 @@ else:
                             if name.endswith("/data/0"):
                                 value = value[:-1] if size_change < 0 else value + b"\x00"
                             destination.writestr(name, value)
-                modified.seek(0)
-                with self.assertRaisesRegex(RuntimeError, "record size"):
-                    torch.load(modified, weights_only=True)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = os.path.join(directory, "checkpoint.pt")
+                    with open(path, "wb") as handle:
+                        handle.write(modified.getvalue())
+                    for mmap in (False, True):
+                        with self.subTest(mmap=mmap):
+                            with self.assertRaisesRegex(pickle.UnpicklingError, "record size"):
+                                torch.load(path, weights_only=True, mmap=mmap)
+
+    def test_shared_tensor_storage_round_trip_preserves_aliasing_with_mmap(self):
+        value = torch.arange(12, dtype=torch.float32)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "checkpoint.pt")
+            torch.save({"base": value, "view": value[3:7]}, path)
+            for mmap in (False, True):
+                with self.subTest(mmap=mmap):
+                    loaded = torch.load(path, weights_only=True, mmap=mmap)
+                    torch.testing.assert_close(loaded["base"], value)
+                    loaded["view"][0] = 43
+                    self.assertEqual(loaded["base"][3].item(), 43)
+
+    def test_invalid_storage_counts_are_rejected_before_materialization(self):
+        data = checkpoint(torch.arange(4, dtype=torch.float32)).getvalue()
+        for replacement in (b"J\xff\xff\xff\xff", b"\x88"):
+            with self.subTest(replacement=replacement):
+                modified = io.BytesIO()
+                with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(modified, "w") as target:
+                    for name in source.namelist():
+                        value = source.read(name)
+                        if name.endswith("/data.pkl"):
+                            operations = list(pickletools.genops(value))
+                            persistent = next(i for i, (op, _, _) in enumerate(operations) if op.name == "BINPERSID")
+                            count = next(i for i in range(persistent - 1, -1, -1)
+                                         if operations[i][0].name == "BININT1")
+                            start, end = operations[count][2], operations[count + 1][2]
+                            value = value[:start] + replacement + value[end:]
+                        target.writestr(name, value)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = os.path.join(directory, "checkpoint.pt")
+                    with open(path, "wb") as handle:
+                        handle.write(modified.getvalue())
+                    for mmap in (False, True):
+                        with self.assertRaisesRegex(pickle.UnpicklingError, "element count"):
+                            torch.load(path, weights_only=True, mmap=mmap)
 
     def test_rnn_cells_reject_inconsistent_gate_weights(self):
         for name, gates in (("lstm_cell", 4), ("gru_cell", 3), ("rnn_tanh_cell", 1), ("rnn_relu_cell", 1)):
@@ -438,6 +488,145 @@ else:
         future.set_result(19)
     assert result.wait() == 19
 ''')
+
+
+class ExportTrustTests(unittest.TestCase):
+    def test_export_rejects_executable_archive_payloads_without_side_effects(self):
+        import torch._export
+
+        with tempfile.TemporaryDirectory() as directory:
+            marker = os.path.join(directory, "executed.txt")
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("version", "1.0")
+                archive.writestr("serialized_constants.pt", checkpoint(ExecutableState(marker)).getvalue())
+                archive.writestr("serialized_state_dict.pt", checkpoint({}).getvalue())
+                archive.writestr("serialized_exported_program.json",
+                                 '{"expr_str": "__import__(\"os\").system(\"false\")"}')
+            for loader in (torch.export.load, torch._export.load):
+                buffer.seek(0)
+                with self.assertRaisesRegex(ValueError, "trusted=True"):
+                    loader(buffer)
+                self.assertEqual(buffer.tell(), 0)
+                self.assertFalse(os.path.exists(marker))
+
+    def test_export_loading_requires_explicit_trust_before_reading_input(self):
+        import torch._export
+
+        for loader in (torch.export.load, torch._export.load):
+            for trust in (False, None, 1, "true"):
+                with self.subTest(loader=loader, trust=trust):
+                    buffer = io.BytesIO(b"untrusted archive contents")
+                    with self.assertRaisesRegex(ValueError, "trusted=True"):
+                        loader(buffer, trusted=trust)
+                    self.assertEqual(buffer.tell(), 0)
+            with self.assertRaisesRegex(ValueError, "trusted=True"):
+                loader("/nonexistent/untrusted-export.pt2")
+
+    def test_authenticated_export_round_trip_preserves_inference_and_extra_files(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([2.0, 3.0]))
+                self.register_buffer("bias", torch.tensor([1.0, -1.0]))
+
+            def forward(self, value):
+                return value * self.weight + self.bias
+
+        model = Model().eval()
+        inputs = torch.tensor([4.0, 5.0])
+        exported = torch.export.export(model, (inputs,))
+        buffer = io.BytesIO()
+        torch.export.save(exported, buffer, extra_files={"description.txt": "authenticated fixture"})
+        buffer.seek(0)
+        extra = {"description.txt": ""}
+        restored = torch.export.load(buffer, trusted=True, extra_files=extra)
+        torch.testing.assert_close(restored.module()(inputs), model(inputs))
+        self.assertEqual(extra["description.txt"], "authenticated fixture")
+
+
+class CompilerRegressionTests(unittest.TestCase):
+    def test_symbolic_modular_indexing_does_not_assume_strict_positivity(self):
+        import sympy
+        from torch.utils._sympy.functions import ModularIndexing
+
+        value = sympy.Symbol("value", integer=True, positive=True)
+        expression = abs(ModularIndexing(value, 1, 1024) - 1)
+        self.assertEqual(expression.subs(value, 1024), 1)
+        self.assertEqual(expression.subs(value, 2), 1)
+
+    def test_namedtuple_slices_preserve_python_tuple_semantics_when_compiled(self):
+        inputs = torch.tensor([[2.0, 1.0], [4.0, 3.0]])
+        for index in (slice(None, 2), slice(-2, None), slice(1, 1), slice(None, None, 2)):
+            with self.subTest(index=index):
+                def operation(value):
+                    return torch.linalg.lu(value)[index]
+
+                expected = operation(inputs)
+                actual = torch.compile(operation, backend="aot_eager", fullgraph=True)(inputs)
+                self.assertIs(type(actual), tuple)
+                self.assertEqual(len(actual), len(expected))
+                for result, reference in zip(actual, expected):
+                    torch.testing.assert_close(result, reference)
+
+    def test_fx_random_overloads_with_keyword_names_produce_executable_graphs(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        for operation in (lambda value: value.random_(0, 2), lambda value: value.uniform_(0, 2)):
+            with self.subTest(operation=operation):
+                graph = make_fx(operation)(torch.zeros(32))
+                result = graph(torch.zeros(32))
+                self.assertEqual(result.shape, (32,))
+                self.assertTrue(torch.all((result >= 0) & (result < 2)).item())
+
+    def test_compiled_like_factories_preserve_noncontiguous_layouts(self):
+        from torch._inductor import config
+
+        inputs = (
+            torch.zeros(4, 5, 6).transpose(1, 2),
+            torch.zeros(3, 4)[:, ::2].permute(1, 0),
+            torch.rot90(torch.zeros(3, 4)),
+        )
+
+        operations = (
+            ("full", lambda value: torch.full_like(value, 3)),
+            ("uniform", torch.rand_like),
+            ("normal", torch.randn_like),
+            ("integer", lambda value: torch.randint_like(value, 1, 11)),
+        )
+        for name, operation in operations:
+            compiled = torch.compile(operation, fullgraph=True)
+            for value in inputs:
+                with self.subTest(factory=name, shape=value.shape, stride=value.stride()):
+                    with config.patch(fallback_random=True):
+                        torch.manual_seed(1729)
+                        expected = operation(value)
+                        torch.manual_seed(1729)
+                        actual = compiled(value)
+                        if name == "normal" and value.numel() >= 16:
+                            # Native contiguous and strided normal kernels use different RNG algorithms.
+                            torch.manual_seed(1729)
+                            torch.testing.assert_close(compiled(value), actual)
+                            torch.manual_seed(1730)
+                            self.assertFalse(torch.equal(compiled(value), actual))
+                            self.assertGreater(actual.std().item(), 0)
+                        else:
+                            torch.testing.assert_close(actual, expected)
+                    self.assertEqual(actual.shape, expected.shape)
+                    self.assertEqual(actual.stride(), expected.stride())
+                    self.assertEqual(actual.dtype, expected.dtype)
+                    self.assertTrue(torch.isfinite(actual).all().item())
+                    if name == "uniform":
+                        self.assertTrue(torch.all((actual >= 0) & (actual < 1)).item())
+                    if name == "integer":
+                        self.assertTrue(torch.all((actual >= 1) & (actual < 11)).item())
+
+    def test_sparse_round_trip_matches_eager_compiled_execution(self):
+        def operation(value):
+            return value.to_sparse().to_dense() + 1
+
+        value = torch.tensor([[1.0, 0.0], [0.0, 2.0]])
+        torch.testing.assert_close(torch.compile(operation)(value), operation(value))
 
 
 if __name__ == "__main__":

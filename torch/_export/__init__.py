@@ -246,7 +246,10 @@ def load(
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
+    trusted: bool = False,
 ) -> ExportedProgram:
+    if trusted is not True:
+        raise ValueError("Export archives require explicit trusted=True after authenticating their source")
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
 
