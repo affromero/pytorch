@@ -2,9 +2,6 @@
 set -euo pipefail
 
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/source
-if [[ -n "${EXPECTED_SOURCE_REVISION:-}" ]]; then
-  test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REVISION"
-fi
 
 export DEBIAN_FRONTEND=noninteractive
 if [[ ! -f /tmp/torch-security-toolchain-ready ]]; then
@@ -12,6 +9,9 @@ if [[ ! -f /tmp/torch-security-toolchain-ready ]]; then
   apt-get install -y --no-install-recommends build-essential ca-certificates git libopenblas-dev patchelf pkg-config
   rm -rf /var/lib/apt/lists/*
   touch /tmp/torch-security-toolchain-ready
+fi
+if [[ -n "${EXPECTED_SOURCE_REVISION:-}" ]]; then
+  test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REVISION"
 fi
 
 build_env=/tmp/torch-security-build
