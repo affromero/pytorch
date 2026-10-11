@@ -56,6 +56,7 @@ export NCCL_LIB_DIR="$nvidia_dir/nccl/lib"
 test -L "$CUDNN_LIB_DIR/libcudnn.so" || ln -s libcudnn.so.8 "$CUDNN_LIB_DIR/libcudnn.so"
 test -L "$NCCL_LIB_DIR/libnccl.so" || ln -s libnccl.so.2 "$NCCL_LIB_DIR/libnccl.so"
 export PYTORCH_EXTRA_INSTALL_REQUIREMENTS='nvidia-cuda-nvrtc-cu12==12.1.105|nvidia-cuda-runtime-cu12==12.1.105|nvidia-cuda-cupti-cu12==12.1.105|nvidia-cudnn-cu12==8.9.2.26|nvidia-cublas-cu12==12.1.3.1|nvidia-cufft-cu12==11.0.2.54|nvidia-curand-cu12==10.3.2.106|nvidia-cusolver-cu12==11.4.5.107|nvidia-cusparse-cu12==12.1.0.106|nvidia-nccl-cu12==2.20.5|nvidia-nvtx-cu12==12.1.105|triton==2.3.0'
+python test/test_security_packaging.py
 if [[ -n "${TORCH_SECURITY_BUILD_SECONDS:-}" ]]; then
   set +e
   timeout --signal=INT --kill-after=60s "$TORCH_SECURITY_BUILD_SECONDS" python setup.py bdist_wheel

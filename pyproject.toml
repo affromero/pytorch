@@ -1,12 +1,12 @@
 [build-system]
 requires = [
-    "setuptools",
-    "wheel",
+    "setuptools==69.5.1",
+    "wheel==0.43.0",
     "astunparse",
-    "numpy",
-    "ninja",
+    "numpy==1.26.4",
+    "ninja==1.11.1.1",
     "pyyaml",
-    "cmake",
+    "cmake==3.29.6",
     "typing-extensions",
     "requests",
 ]

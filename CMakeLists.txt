@@ -752,6 +752,7 @@ endif()
 # aotriton build decision later.
 
 include(cmake/Dependencies.cmake)
+include(cmake/SecurityBackport.cmake)
 
 cmake_dependent_option(
   USE_FLASH_ATTENTION

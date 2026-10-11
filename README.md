@@ -48,6 +48,12 @@ This fork retains the PyTorch 2.3.0 stack and CUDA 12.1 ABI used by Splattie.
 Its wheel version is `2.3.0+cu121.security1`, identifying this backport of
 upstream security fixes.
 
+Native source builds use `2.3.0+security.1`. The source metadata can be resolved
+without compiling Torch, and isolated builds pin the tested NumPy and build
+tool versions. The Linux CUDA wheel retains its explicit version override.
+Windows source builds require MSVC, CUDA 12.1 and cuDNN 8.9.2 and fail if CMake
+disables CUDA or cuDNN. Native macOS and Windows builds remain unverified.
+
 Backported upstream fixes:
 
 - Restricted legacy TAR loading: `8d4b8a920a2172523deb95bf20e8e52d50649c04`.
