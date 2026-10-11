@@ -417,6 +417,7 @@ else:
     raise AssertionError("null future accepted")
 ''')
 
+    @unittest.skipUnless(torch.backends.mkldnn.is_available(), "MKLDNN is unavailable on this build")
     def test_mkldnn_pooling_rejects_nonpositive_stride_without_crashing(self):
         for stride in (0, -1):
             with self.subTest(stride=stride):
@@ -452,13 +453,16 @@ else:
             torch.zeros(3, 1, 3).log_softmax(2), torch.tensor([1]), [3], [1]
         )
         self.assertTrue(torch.isfinite(loss))
+        unit = torch.jit.CompilationUnit("def valid(x: int):\n    values: List[int] = [x]\n    return values[0]\n")
+        self.assertEqual(unit.valid(23), 23)
+
+    @unittest.skipUnless(torch.backends.mkldnn.is_available(), "MKLDNN is unavailable on this build")
+    def test_valid_mkldnn_pooling_preserves_results(self):
         values = torch.arange(16, dtype=torch.float32).reshape(1, 1, 4, 4)
         torch.testing.assert_close(
             torch.nn.functional.max_pool2d(values.to_mkldnn(), 2, stride=2).to_dense(),
             torch.tensor([[[[5.0, 7.0], [13.0, 15.0]]]]),
         )
-        unit = torch.jit.CompilationUnit("def valid(x: int):\n    values: List[int] = [x]\n    return values[0]\n")
-        self.assertEqual(unit.valid(23), 23)
 
     def test_profiler_future_retains_record_and_propagates_result_or_error(self):
         for legacy in (False, True):

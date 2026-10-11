@@ -1,0 +1,42 @@
+name: Native macOS ARM64 security backport
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 350
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      EXPECTED_SOURCE_REVISION: ${{ github.sha }}
+    steps:
+      - name: Check native architecture and build capacity
+        run: |
+          test "$(uname -m)" = arm64
+          test -d "$DEVELOPER_DIR"
+          available=$(df -g "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')
+          test "$available" -ge 20
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+      - name: Install the native OpenMP dependency
+        run: brew install libomp
+      - name: Compile, repair and verify the native wheel
+        run: bash tools/security/build-macos-arm64.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: torch-macos-arm64-security-${{ github.sha }}
+          path: |
+            dist/*.whl
+            dist/SHA256SUMS
+            dist/build-provenance.txt
+            dist/build-tools-uv.lock
+            dist/native-regressions.log
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0

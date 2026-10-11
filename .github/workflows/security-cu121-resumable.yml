@@ -4,6 +4,10 @@ on:
     branches: [security/cu121-backports]
   workflow_dispatch:
     inputs:
+      macos_only:
+        description: Build and verify the native Mac ARM64 wheel instead
+        type: boolean
+        default: false
       checkpoint:
         description: Verified checkpoint artifact from this repository
         type: string
@@ -20,7 +24,11 @@ permissions:
   contents: read
   actions: read
 jobs:
+  macos-arm64:
+    if: ${{ inputs.macos_only }}
+    uses: ./.github/workflows/security-macos-arm64.yml
   stage-1:
+    if: ${{ !inputs.macos_only }}
     uses: ./.github/workflows/security-cu121-stage.yml
     with:
       stage: 1
@@ -49,7 +57,7 @@ jobs:
       checkpoint: ${{ needs.stage-3.outputs.checkpoint }}
       wheel: ${{ needs.stage-3.outputs.wheel }}
   verified-wheel:
-    if: always()
+    if: ${{ always() && !inputs.macos_only }}
     needs: [stage-1, stage-2, stage-3, stage-4]
     runs-on: ubuntu-22.04
     steps:

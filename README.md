@@ -53,6 +53,11 @@ without compiling Torch, and isolated builds pin the tested NumPy and build
 tool versions. The Linux CUDA wheel retains its explicit version override.
 Windows source builds require MSVC, CUDA 12.1 and cuDNN 8.9.2 and fail if CMake
 disables CUDA or cuDNN. Native macOS and Windows builds remain unverified.
+The manual macOS ARM64 workflow builds with Xcode 16.4, repairs external
+libraries, checks the resulting deployment target and runs the canonical CPU
+regressions in a separate runtime environment. MPS must remain built, but its
+kernels are not executed. Only the two MKLDNN tests are skipped when that
+backend is unavailable; the Linux CUDA build requires MKLDNN.
 
 Backported upstream fixes:
 
