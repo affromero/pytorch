@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-    "setuptools==69.5.1",
-    "wheel==0.43.0",
+    "setuptools==83.0.0",
+    "wheel==0.46.2",
     "astunparse",
     "numpy==1.26.4",
     "ninja==1.11.1.1",

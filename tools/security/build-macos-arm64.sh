@@ -14,7 +14,7 @@ name = "torch-macos-security-build"
 version = "0.0.0"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "setuptools==69.5.1", "wheel==0.43.0", "cmake==3.29.6", "ninja==1.11.1.1",
+  "setuptools==83.0.0", "wheel==0.46.2", "cmake==3.29.6", "ninja==1.11.1.1",
   "numpy==1.26.4", "astunparse==1.6.3", "pyyaml==6.0.2", "packaging==24.2",
   "typing-extensions>=4.8", "requests", "delocate==0.13.0",
 ]

@@ -22,7 +22,7 @@ name = "torch-security-build"
 version = "0.0.0"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "setuptools==69.5.1", "wheel==0.43.0", "cmake==3.29.6", "ninja==1.11.1.1",
+  "setuptools==83.0.0", "wheel==0.46.2", "cmake==3.29.6", "ninja==1.11.1.1",
   "numpy==1.26.4", "pyyaml==6.0.2", "packaging==24.2", "typing-extensions>=4.8",
   "auditwheel==6.2.0",
   "nvidia-cuda-nvrtc-cu12==12.1.105", "nvidia-cuda-runtime-cu12==12.1.105",
@@ -33,11 +33,8 @@ dependencies = [
   "nvidia-nvtx-cu12==12.1.105", "triton==2.3.0",
 ]
 TOML
-if [[ -f "$build_env/uv.lock" ]]; then
-  uv sync --project "$build_env" --python 3.11.15 --frozen
-else
-  uv sync --project "$build_env" --python 3.11.15
-fi
+uv lock --project "$build_env" --python 3.11.15
+uv sync --project "$build_env" --python 3.11.15 --frozen
 export PATH="$build_env/.venv/bin:$PATH"
 export VIRTUAL_ENV="$build_env/.venv"
 export CUDA_HOME=/usr/local/cuda
