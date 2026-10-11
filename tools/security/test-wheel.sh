@@ -12,7 +12,7 @@ cat > pyproject.toml <<TOML
 name = "torch-relocation-test"
 version = "0.0.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["torch", "numpy==1.26.4"]
+dependencies = ["torch", "numpy==1.26.4", "setuptools==84.0.0"]
 [tool.uv.sources]
 torch = { path = "$wheel_path" }
 TOML
