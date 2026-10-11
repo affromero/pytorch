@@ -84,6 +84,12 @@ relocation and declared NVIDIA dependencies. No GPU is available for kernel
 execution or generation validation; a successful build does not establish
 those results. Build artifacts include their source revision and SHA-256.
 
+The resumable workflow checkpoints an interrupted compile after three hours.
+It preserves the source timestamps, Ninja state, and complete Docker build
+environment across up to four stages. Compiler errors fail the build.
+The final gate requires the wheel to pass native tests and verification in a
+clean runtime container, then checks the uploaded artifact's SHA-256.
+
 ## More About PyTorch
 
 [Learn the basics of PyTorch](https://pytorch.org/tutorials/beginner/basics/intro.html)

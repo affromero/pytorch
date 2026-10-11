@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/source
+if [[ -n "${EXPECTED_SOURCE_REVISION:-}" ]]; then
+  test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REVISION"
+fi
+
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends build-essential ca-certificates git libopenblas-dev patchelf pkg-config
-rm -rf /var/lib/apt/lists/*
+if [[ ! -f /tmp/torch-security-toolchain-ready ]]; then
+  apt-get update
+  apt-get install -y --no-install-recommends build-essential ca-certificates git libopenblas-dev patchelf pkg-config
+  rm -rf /var/lib/apt/lists/*
+  touch /tmp/torch-security-toolchain-ready
+fi
 
 build_env=/tmp/torch-security-build
 mkdir -p "$build_env"
@@ -25,7 +33,11 @@ dependencies = [
   "nvidia-nvtx-cu12==12.1.105", "triton==2.3.0",
 ]
 TOML
-uv sync --project "$build_env" --python 3.11.15
+if [[ -f "$build_env/uv.lock" ]]; then
+  uv sync --project "$build_env" --python 3.11.15 --frozen
+else
+  uv sync --project "$build_env" --python 3.11.15
+fi
 export PATH="$build_env/.venv/bin:$PATH"
 export VIRTUAL_ENV="$build_env/.venv"
 export CUDA_HOME=/usr/local/cuda
@@ -41,10 +53,23 @@ export CUDNN_INCLUDE_DIR="$nvidia_dir/cudnn/include"
 export CUDNN_LIB_DIR="$nvidia_dir/cudnn/lib"
 export NCCL_INCLUDE_DIR="$nvidia_dir/nccl/include"
 export NCCL_LIB_DIR="$nvidia_dir/nccl/lib"
-ln -s libcudnn.so.8 "$CUDNN_LIB_DIR/libcudnn.so"
-ln -s libnccl.so.2 "$NCCL_LIB_DIR/libnccl.so"
+test -L "$CUDNN_LIB_DIR/libcudnn.so" || ln -s libcudnn.so.8 "$CUDNN_LIB_DIR/libcudnn.so"
+test -L "$NCCL_LIB_DIR/libnccl.so" || ln -s libnccl.so.2 "$NCCL_LIB_DIR/libnccl.so"
 export PYTORCH_EXTRA_INSTALL_REQUIREMENTS='nvidia-cuda-nvrtc-cu12==12.1.105|nvidia-cuda-runtime-cu12==12.1.105|nvidia-cuda-cupti-cu12==12.1.105|nvidia-cudnn-cu12==8.9.2.26|nvidia-cublas-cu12==12.1.3.1|nvidia-cufft-cu12==11.0.2.54|nvidia-curand-cu12==10.3.2.106|nvidia-cusolver-cu12==11.4.5.107|nvidia-cusparse-cu12==12.1.0.106|nvidia-nccl-cu12==2.20.5|nvidia-nvtx-cu12==12.1.105|triton==2.3.0'
-python setup.py bdist_wheel
+if [[ -n "${TORCH_SECURITY_BUILD_SECONDS:-}" ]]; then
+  set +e
+  timeout --signal=INT --kill-after=60s "$TORCH_SECURITY_BUILD_SECONDS" python setup.py bdist_wheel
+  build_status=$?
+  set -e
+  if [[ "$build_status" == 124 ]]; then
+    exit 75
+  fi
+  if [[ "$build_status" != 0 ]]; then
+    exit "$build_status"
+  fi
+else
+  python setup.py bdist_wheel
+fi
 
 auditwheel repair dist/torch-*.whl --plat manylinux_2_35_x86_64 \
   --exclude 'libcu*.so*' --exclude 'libnccl.so*' --exclude 'libnv*.so*' \

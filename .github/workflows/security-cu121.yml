@@ -1,8 +1,6 @@
 name: CUDA 12.1 security backport
 
 on:
-  push:
-    branches: [security/cu121-backports]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +26,7 @@ jobs:
             --volume "$PWD:/source" \
             --volume "$(command -v uv):/usr/local/bin/uv:ro" \
             --workdir /source \
+            --env EXPECTED_SOURCE_REVISION="$GITHUB_SHA" \
             nvidia/cuda:12.1.1-devel-ubuntu22.04 \
             bash tools/security/build-cu121.sh
       - name: Verify the wheel in a separate runtime container

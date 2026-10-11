@@ -1,0 +1,52 @@
+name: Resumable CUDA 12.1 security backport
+on:
+  push:
+    branches: [security/cu121-backports]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stage-1:
+    uses: ./.github/workflows/security-cu121-stage.yml
+    with:
+      stage: 1
+  stage-2:
+    needs: stage-1
+    uses: ./.github/workflows/security-cu121-stage.yml
+    with:
+      stage: 2
+      checkpoint: ${{ needs.stage-1.outputs.checkpoint }}
+      wheel: ${{ needs.stage-1.outputs.wheel }}
+  stage-3:
+    needs: stage-2
+    uses: ./.github/workflows/security-cu121-stage.yml
+    with:
+      stage: 3
+      checkpoint: ${{ needs.stage-2.outputs.checkpoint }}
+      wheel: ${{ needs.stage-2.outputs.wheel }}
+  stage-4:
+    needs: stage-3
+    uses: ./.github/workflows/security-cu121-stage.yml
+    with:
+      stage: 4
+      checkpoint: ${{ needs.stage-3.outputs.checkpoint }}
+      wheel: ${{ needs.stage-3.outputs.wheel }}
+  verified-wheel:
+    if: always()
+    needs: [stage-1, stage-2, stage-3, stage-4]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require a wheel that passed native and clean-container tests
+        env:
+          WHEEL_ARTIFACT: ${{ needs.stage-4.outputs.wheel }}
+          FINAL_STAGE_RESULT: ${{ needs.stage-4.result }}
+        run: |
+          test "$FINAL_STAGE_RESULT" = success
+          test -n "$WHEEL_ARTIFACT"
+          printf 'Verified artifact: %s\n' "$WHEEL_ARTIFACT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.stage-4.outputs.wheel }}
+          path: dist
+      - name: Verify the published wheel digest
+        run: sha256sum --check dist/SHA256SUMS

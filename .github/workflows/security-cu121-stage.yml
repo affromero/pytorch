@@ -1,0 +1,88 @@
+name: CUDA 12.1 build stage
+on:
+  workflow_call:
+    inputs:
+      stage:
+        type: number
+        required: true
+      checkpoint:
+        type: string
+        default: ''
+      wheel:
+        type: string
+        default: ''
+    outputs:
+      checkpoint:
+        value: ${{ jobs.stage.outputs.checkpoint }}
+      wheel:
+        value: ${{ jobs.stage.outputs.wheel }}
+permissions:
+  contents: read
+jobs:
+  stage:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    outputs:
+      checkpoint: ${{ steps.compile.outputs.checkpoint }}
+      wheel: ${{ steps.carry.outputs.wheel || steps.compile.outputs.wheel }}
+    env:
+      CHECKPOINT_ARTIFACT: ${{ inputs.checkpoint }}
+      PREVIOUS_WHEEL: ${{ inputs.wheel }}
+      BUILD_STAGE: ${{ inputs.stage }}
+    steps:
+      - name: Carry forward a verified wheel
+        id: carry
+        if: inputs.wheel != ''
+        run: printf 'wheel=%s\n' "$PREVIOUS_WHEEL" >> "$GITHUB_OUTPUT"
+      - name: Reserve build space on the ephemeral runner
+        if: inputs.wheel == ''
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          available=$(df --output=avail -BG "$GITHUB_WORKSPACE" | tail -1 | tr -dc '0-9')
+          test "$available" -ge 55
+          mkdir -p "$RUNNER_TEMP/torch-checkpoint"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: inputs.wheel == ''
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        if: inputs.wheel == ''
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: inputs.wheel == '' && inputs.checkpoint != ''
+        with:
+          name: ${{ inputs.checkpoint }}
+          path: ${{ runner.temp }}/torch-checkpoint
+      - name: Resume or compile for at most three hours
+        if: inputs.wheel == ''
+        id: compile
+        run: bash tools/security/stage-cu121.sh
+      - name: Verify the wheel in a separate runtime container
+        if: steps.compile.outputs.wheel != ''
+        run: |
+          docker run --rm \
+            --volume "$PWD/dist:/wheelhouse:ro" \
+            --volume "$PWD/test/test_security_backports.py:/regressions.py:ro" \
+            --volume "$PWD/tools/security/test-wheel.sh:/test-wheel.sh:ro" \
+            --volume "$(command -v uv):/usr/local/bin/uv:ro" \
+            ubuntu:22.04 bash /test-wheel.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.compile.outputs.wheel != ''
+        with:
+          name: ${{ steps.compile.outputs.wheel }}
+          path: |
+            dist/*.whl
+            dist/SHA256SUMS
+            dist/build-provenance.txt
+            dist/native-regressions.log
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.compile.outputs.checkpoint != ''
+        with:
+          name: ${{ steps.compile.outputs.checkpoint }}
+          path: ${{ runner.temp }}/torch-checkpoint/
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
