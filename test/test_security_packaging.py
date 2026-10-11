@@ -22,12 +22,21 @@ class SourcePackagingTests(unittest.TestCase):
                 environment = os.environ.copy()
                 environment.pop("PYTORCH_BUILD_VERSION", None)
                 environment.pop("PYTORCH_BUILD_NUMBER", None)
+                shadow = Path(directory) / "shadow" / "tools"
+                shadow.mkdir(parents=True)
+                (shadow / "__init__.py").write_text("")
+                environment["PYTHONPATH"] = str(shadow.parent)
                 if override is not None:
                     environment["PYTORCH_BUILD_VERSION"] = override
                     environment["PYTORCH_BUILD_NUMBER"] = "1"
                 code = (
+                    "import sys; "
+                    "sys.path.insert(0, " + repr(str(SOURCE)) + "); "
+                    "sys.path.insert(0, " + repr(str(shadow.parent)) + "); "
                     "import setuptools.build_meta; "
-                    "setuptools.build_meta.__legacy__.prepare_metadata_for_build_wheel(" + repr(directory) + ")"
+                    "backend = setuptools.build_meta.__legacy__; "
+                    "backend.get_requires_for_build_wheel(); "
+                    "backend.prepare_metadata_for_build_wheel(" + repr(directory) + ")"
                 )
                 result = subprocess.run(
                     [sys.executable, "-c", code],
