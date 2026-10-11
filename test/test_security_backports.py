@@ -50,6 +50,18 @@ class RestrictedLoadingTests(unittest.TestCase):
     def tearDown(self):
         torch.serialization.clear_safe_globals()
 
+    def test_restricted_loading_rejects_torchscript_and_explicit_jit_loading_preserves_inference(self):
+        expected = torch.arange(4, dtype=torch.float32)
+        module = torch.jit.trace(torch.nn.ReLU(), expected)
+        buffer = io.BytesIO()
+        torch.jit.save(module, buffer)
+        buffer.seek(0)
+        with self.assertRaisesRegex(RuntimeError, "TorchScript archive"):
+            torch.load(buffer, weights_only=True)
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer, map_location="cpu")
+        torch.testing.assert_close(loaded(expected), module(expected))
+
     def test_legacy_tar_is_rejected_before_unpickling(self):
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w") as archive:

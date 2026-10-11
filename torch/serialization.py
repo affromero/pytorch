@@ -1039,6 +1039,9 @@ def load(
             overall_storage = None
             with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
+                    if weights_only:
+                        raise RuntimeError("Cannot use weights_only=True with a TorchScript archive. "
+                                           "Use torch.jit.load only for a trusted TorchScript model.")
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
                                   " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
                                   " silence this warning)", UserWarning)
