@@ -51,7 +51,43 @@ __all__ = [
     'LoadEndianness',
     'get_default_load_endianness',
     'set_default_load_endianness',
+    'add_safe_globals',
+    'clear_safe_globals',
+    'get_safe_globals',
+    'safe_globals',
 ]
+
+
+def add_safe_globals(safe_globals: List[Any]) -> None:
+    """Allow trusted functions/classes for restricted loads in this execution context."""
+    _weights_only_unpickler._add_safe_globals(safe_globals)
+
+
+def clear_safe_globals() -> None:
+    """Clear the trusted globals in this execution context."""
+    _weights_only_unpickler._clear_safe_globals()
+
+
+def get_safe_globals() -> List[Any]:
+    """Return a copy of this context's explicitly trusted globals."""
+    return _weights_only_unpickler._get_safe_globals()
+
+
+@contextmanager
+def safe_globals(safe_globals: List[Any]):
+    """Temporarily allow trusted globals, restoring the previous scope on exit.
+
+    Permissions are isolated between execution contexts. Each restricted
+    unpickler snapshots its permissions before reading checkpoint contents.
+    """
+    token = _weights_only_unpickler._safe_globals_context.set(
+        _weights_only_unpickler._safe_globals_context.get()
+    )
+    try:
+        add_safe_globals(safe_globals)
+        yield
+    finally:
+        _weights_only_unpickler._safe_globals_context.reset(token)
 
 
 class SourceChangeWarning(Warning):
@@ -1125,7 +1161,10 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
         with closing(tarfile.open(fileobj=f, mode='r:', format=tarfile.PAX_FORMAT)) as tar, \
                 mkdtemp() as tmpdir:
-
+            if pickle_module is _weights_only_unpickler:
+                raise RuntimeError(
+                    "Cannot use weights_only=True with files saved in the legacy .tar format"
+                )
             tar.extract('storages', path=tmpdir)
             with open(os.path.join(tmpdir, 'storages'), 'rb', 0) as f:
                 num_storages = pickle_module.load(f, **pickle_load_args)

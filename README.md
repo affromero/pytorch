@@ -42,6 +42,48 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 
 <!-- tocstop -->
 
+## CUDA 12.1 security maintenance
+
+This fork retains the PyTorch 2.3.0 API and CUDA 12.1 ABI used by Splattie.
+Its wheel version is `2.3.0+cu121.security1`, identifying this backport of
+upstream security fixes.
+
+Backported upstream fixes:
+
+- Restricted legacy TAR loading: `8d4b8a920a2172523deb95bf20e8e52d50649c04`.
+- Empty packed sequences: `494518046816d29099b7d056a74ffa5c244fdcdd`.
+- RNN gate dimensions: `999d94b5ede5f4ec111ba7dd144129e2c2725b03`.
+- Bare JIT container annotations: `b90c94991cdf8b87c8f7439f79518e0ef2c4ca4f`.
+- Empty CTC inputs: `01f226bfb8f2c343f5c614a6bbf685d91160f3af`.
+- Nonpositive MKLDNN strides: `6f327128a99debfb2312ee256523ad6b62f763d6`.
+- Explicit restricted-loader globals:
+  `66dc8fb7ff822033c4b161fc216e21d6886568c7`,
+  `a135776307500acce6c9bd955452ad76337d826d`,
+  `c5f7755e86706a7818a3f59cc98b99eaf906ba1b`,
+  `7c289c2a5c4e2233251565afadc2d95acf64b8c1`,
+  `d3556786b8daa1375e4c3038eef8f1f187f3a75e`,
+  `1e9bedf6880f813b165e357cd62c8a7238789aad`,
+  `cbfb005f7cce79974795b148e265f594f59477c8`, and
+  `dc48fef658cc6fde242af3608d98a9132ea56f2f`.
+
+The scoped allowlist uses context-local immutable permissions and an
+immutable snapshot per restricted Unpickler. Nested scopes restore their
+previous permissions, and unrelated threads and tasks cannot borrow them.
+Only explicitly supplied objects are trusted. Tensor subclasses are never
+discovered or trusted implicitly.
+
+Additional fixes validate profiler handles and futures synchronously
+(GHSA-c678-jfcj-6jmf), preserve quantized Sigmoid parameters through state
+serialization (GHSA-x3gm-94wq-g975), and validate archive storage sizes before
+constructing native tensor storage.
+
+The security workflow compiles all CUDA architectures configured by Splattie
+and runs restricted-loading, quantized-inference and native CPU regressions
+against the resulting wheel. A separate runtime container verifies package
+relocation and declared NVIDIA dependencies. No GPU is available for kernel
+execution or generation validation; a successful build does not establish
+those results. Build artifacts include their source revision and SHA-256.
+
 ## More About PyTorch
 
 [Learn the basics of PyTorch](https://pytorch.org/tutorials/beginner/basics/intro.html)

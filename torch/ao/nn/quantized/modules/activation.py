@@ -1,4 +1,5 @@
 import torch
+import math
 from warnings import warn
 __all__ = [
     "ReLU6",
@@ -152,6 +153,44 @@ class Sigmoid(torch.nn.Sigmoid):
 
     def forward(self, input):
         return torch.ops.quantized.sigmoid(input, self.output_scale, self.output_zero_point)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + "output_scale"] = torch.tensor(self.output_scale, dtype=torch.float64)
+        destination[prefix + "output_zero_point"] = torch.tensor(self.output_zero_point, dtype=torch.int64)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        values = {}
+        for name in ("output_scale", "output_zero_point"):
+            key = prefix + name
+            if key not in state_dict:
+                missing_keys.append(key)
+                continue
+            value = state_dict.pop(key)
+            if not isinstance(value, torch.Tensor) or value.dim() != 0:
+                error_msgs.append(f"Expected a scalar tensor for {key}")
+                continue
+            try:
+                scalar = value.item()
+                if type(scalar) not in (float, int) or not math.isfinite(scalar):
+                    raise ValueError("expected a finite number")
+                if name == "output_scale":
+                    if scalar <= 0:
+                        raise ValueError("scale must be positive")
+                    values[name] = float(scalar)
+                else:
+                    point = int(scalar)
+                    if scalar != point or not -(2 ** 63) <= point < 2 ** 63:
+                        raise ValueError("zero point must be an int64")
+                    values[name] = point
+            except (TypeError, ValueError, RuntimeError, OverflowError) as error:
+                error_msgs.append(f"Invalid quantization parameter {key}: {error}")
+        if len(values) == 2:
+            self.output_scale = values["output_scale"]
+            self.output_zero_point = values["output_zero_point"]
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                     missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod):

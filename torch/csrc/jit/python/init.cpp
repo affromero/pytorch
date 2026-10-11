@@ -1549,9 +1549,15 @@ void initJITBindings(PyObject* module) {
              const std::string& key,
              size_t numel,
              py::object data_type_obj) {
-            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto [data, size] = self.getRecord(key);
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            const auto element_size = elementSize(scalar_type);
+            TORCH_CHECK(
+                size % element_size == 0 && numel == size / element_size,
+                "record size does not match expected storage size for dtype ",
+                scalar_type);
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),

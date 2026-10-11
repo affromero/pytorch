@@ -17,7 +17,11 @@
 # weights = torch.load(buf, weights_only = True)
 
 import functools as _functools
+from _codecs import encode
+from _compat_pickle import IMPORT_MAPPING, NAME_MAPPING
 from collections import OrderedDict
+from contextvars import ContextVar
+from types import MappingProxyType
 from pickle import (
     APPEND,
     APPENDS,
@@ -64,6 +68,29 @@ from typing import Any, Dict, List
 import torch
 
 
+_safe_globals_context: ContextVar[tuple] = ContextVar("torch_safe_globals", default=())
+_blocklisted_modules = frozenset({"sys", "os", "posix", "nt"})
+
+
+def _get_safe_globals():
+    return list(_safe_globals_context.get())
+
+
+def _add_safe_globals(safe_globals):
+    current = _safe_globals_context.get()
+    additions = tuple(safe_globals)
+    for value in additions:
+        if not callable(value) or not isinstance(value.__module__, str) or not isinstance(value.__name__, str):
+            raise TypeError("Safe globals must be named functions or classes")
+    _safe_globals_context.set(current + tuple(
+        value for value in additions if not any(value is item for item in current)
+    ))
+
+
+def _clear_safe_globals():
+    _safe_globals_context.set(())
+
+
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
@@ -73,6 +100,8 @@ def _get_allowed_globals():
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
+        "_codecs.encode": encode,
+        "builtins.bytearray": bytearray,
     }
     # dtype
     for t in [
@@ -128,6 +157,10 @@ class Unpickler:
         self.readline = file.readline
         self.read = file.read
         self.memo: Dict[int, Any] = {}
+        self.user_allowed_globals = MappingProxyType({
+            f"{value.__module__}.{value.__name__}": value
+            for value in _safe_globals_context.get()
+        })
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -148,21 +181,34 @@ class Unpickler:
             if key[0] == GLOBAL[0]:
                 module = readline()[:-1].decode("utf-8")
                 name = readline()[:-1].decode("utf-8")
+                if (module, name) in NAME_MAPPING:
+                    module, name = NAME_MAPPING[(module, name)]
+                elif module in IMPORT_MAPPING:
+                    module = IMPORT_MAPPING[module]
                 full_path = f"{module}.{name}"
+                if module.split(".", 1)[0] in _blocklisted_modules:
+                    raise UnpicklingError(f"Unsupported global in blocked module: {module}")
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
+                elif full_path in self.user_allowed_globals:
+                    self.append(self.user_allowed_globals[full_path])
                 else:
                     raise RuntimeError(f"Unsupported class {full_path}")
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
-                if cls is not torch.nn.Parameter:
+                if cls is torch.nn.Parameter:
+                    self.append(torch.nn.Parameter(*args))
+                elif any(cls is value for value in self.user_allowed_globals.values()):
+                    self.append(cls.__new__(cls, *args))
+                else:
                     raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
-                self.append(torch.nn.Parameter(*args))
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if func not in _get_allowed_globals().values():
+                if not any(func is value for value in _get_allowed_globals().values()) and not any(
+                    func is value for value in self.user_allowed_globals.values()
+                ):
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
@@ -177,6 +223,11 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
+                elif any(type(inst) is value for value in self.user_allowed_globals.values()):
+                    if hasattr(inst, "__setstate__"):
+                        inst.__setstate__(state)
+                    else:
+                        inst.__dict__.update(state)
                 else:
                     raise RuntimeError(
                         f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"
@@ -200,9 +251,11 @@ class Unpickler:
                 list_obj.extend(items)
             elif key[0] == SETITEM[0]:
                 (v, k) = (self.stack.pop(), self.stack.pop())
+                self._check_set_item_target()
                 self.stack[-1][k] = v
             elif key[0] == SETITEMS[0]:
                 items = self.pop_mark()
+                self._check_set_item_target()
                 for i in range(0, len(items), 2):
                     self.stack[-1][items[i]] = items[i + 1]
             elif key[0] == MARK[0]:
@@ -256,7 +309,7 @@ class Unpickler:
             elif key[0] == BINPERSID[0]:
                 pid = self.stack.pop()
                 # Only allow persistent load of storage
-                if type(pid) is not tuple and not type(pid) is not int:
+                if type(pid) is not tuple and type(pid) is not int:
                     raise RuntimeError(
                         f"persistent_load id must be tuple or int, but got {type(pid)}"
                     )
@@ -266,7 +319,7 @@ class Unpickler:
                     and torch.serialization._maybe_decode_ascii(pid[0]) != "storage"
                 ):
                     raise RuntimeError(
-                        f"Only persistent_load of storage is allowed, but got {pid[0]}"
+                        f"Only persistent_load of storage is allowed, but got {type(pid[0])}"
                     )
                 self.append(self.persistent_load(pid))
             elif key[0] in [BINGET[0], LONG_BINGET[0]]:
@@ -297,6 +350,10 @@ class Unpickler:
         self.stack = self.metastack.pop()
         self.append = self.stack.append
         return items
+
+    def _check_set_item_target(self):
+        if type(self.stack[-1]) not in (dict, OrderedDict):
+            raise UnpicklingError("Can only update dict or OrderedDict objects")
 
     def persistent_load(self, pid):
         raise UnpicklingError("unsupported persistent id encountered")

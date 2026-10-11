@@ -3074,6 +3074,22 @@ struct to_ir {
     }
   }
 
+  TypePtr parseTypeHintFromExpr(const Expr& type_expr) {
+    auto type = typeParser_.parseTypeFromExpr(type_expr);
+    const char* container = nullptr;
+    if (type->kind() == AnyListType::Kind) {
+      container = "list";
+    } else if (type->kind() == AnyTupleType::Kind) {
+      container = "tuple";
+    }
+    if (container) {
+      throw ErrorReport(type_expr)
+          << "Attempted to use " << container << " without a contained type. "
+          << "Please add a contained type, e.g. " << container << "[int]";
+    }
+    return type;
+  }
+
   void emitSingleAssignment(const Assign& stmt) {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range())
@@ -3085,7 +3101,7 @@ struct to_ir {
         auto v = Var(stmt.lhs());
         TypePtr type = nullptr;
         if (stmt.type().present()) {
-          type = typeParser_.parseTypeFromExpr(stmt.type().get());
+          type = parseTypeHintFromExpr(stmt.type().get());
         }
         auto rhs_sugared_val = emitSugaredExpr(rhs, 1, type);
         // START BC HACK
@@ -3146,7 +3162,7 @@ struct to_ir {
 
     TypePtr type_hint = nullptr;
     if (stmt.type().present()) {
-      type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
+      type_hint = parseTypeHintFromExpr(stmt.type().get());
     }
     const auto lhs = Select(stmt.lhs());
     auto lhsObject = emitSugaredExpr(lhs.value(), 1);

@@ -1,0 +1,50 @@
+name: CUDA 12.1 security backport
+
+on:
+  push:
+    branches: [security/cu121-backports]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: Reserve build space on the ephemeral runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          available=$(df --output=avail -BG "$GITHUB_WORKSPACE" | tail -1 | tr -dc '0-9')
+          test "$available" -ge 55
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+      - name: Compile and test without a GPU
+        run: |
+          docker run --rm \
+            --volume "$PWD:/source" \
+            --volume "$(command -v uv):/usr/local/bin/uv:ro" \
+            --workdir /source \
+            nvidia/cuda:12.1.1-devel-ubuntu22.04 \
+            bash tools/security/build-cu121.sh
+      - name: Verify the wheel in a separate runtime container
+        run: |
+          docker run --rm \
+            --volume "$PWD/dist:/wheelhouse:ro" \
+            --volume "$PWD/test/test_security_backports.py:/regressions.py:ro" \
+            --volume "$PWD/tools/security/test-wheel.sh:/test-wheel.sh:ro" \
+            --volume "$(command -v uv):/usr/local/bin/uv:ro" \
+            ubuntu:22.04 bash /test-wheel.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: torch-cu121-security-${{ github.sha }}
+          path: |
+            dist/*.whl
+            dist/SHA256SUMS
+            dist/build-provenance.txt
+            dist/native-regressions.log
+          if-no-files-found: error
+          retention-days: 90

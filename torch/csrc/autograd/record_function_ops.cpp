@@ -80,6 +80,7 @@ template <typename Func>
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
     Func get_record,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
+  TORCH_CHECK(fut, "Expected a non-null Future");
   // Profiling callback that ends the associated record_function
   // and returns the value of the passed in future.
   auto futureProfilingFunc =
@@ -104,6 +105,8 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
 static c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_legacy(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
+  TORCH_CHECK(handle.defined(), "Expected a defined RecordFunction handle");
+  (void)getRecordFunctionFromTensor(handle);
   return _call_end_callbacks_on_fut(
       [handle]() -> at::RecordFunction& {
         TORCH_INTERNAL_ASSERT(
@@ -121,6 +124,7 @@ static c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_legacy
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
     const c10::intrusive_ptr<PythonRecordFunction>& record,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
+  TORCH_CHECK(record, "Expected a non-null RecordFunction");
   return _call_end_callbacks_on_fut(
       [record]() -> at::RecordFunction& { return record->record; }, fut);
 }
