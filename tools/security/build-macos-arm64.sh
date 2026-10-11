@@ -36,6 +36,16 @@ env -u MACOSX_DEPLOYMENT_TARGET delocate-wheel --require-archs arm64 --wheel-dir
 rm dist/*.whl
 mv repaired/*.whl dist/
 cp "$build_env/uv.lock" dist/build-tools-uv.lock
+{
+  printf '%s\n' "$source_revision"
+  sw_vers
+  xcodebuild -version
+  xcrun --show-sdk-version
+  clang --version
+  brew list --versions libomp
+  "$build_env/.venv/bin/python" --version
+} > dist/build-provenance.txt
+shasum -a 256 dist/*.whl > dist/SHA256SUMS
 wheel_path=$(python -c 'import pathlib; print(next(pathlib.Path("dist").glob("*.whl")).resolve())')
 test_env="$RUNNER_TEMP/torch-macos-runtime"
 mkdir -p "$test_env"
@@ -76,14 +86,4 @@ print(torch.__config__.show())
 PY
 .venv/bin/python "$source_root/test/test_security_backports.py" -v 2>&1 | tee "$source_root/dist/native-regressions.log"
 cd "$source_root"
-{
-  printf '%s\n' "$source_revision"
-  sw_vers
-  xcodebuild -version
-  xcrun --show-sdk-version
-  clang --version
-  brew list --versions libomp
-  "$build_env/.venv/bin/python" --version
-  printf '%s\n' 'Native CPU regressions passed. MPS is built; GPU kernels and generation were not executed.'
-} > dist/build-provenance.txt
-shasum -a 256 dist/*.whl > dist/SHA256SUMS
+printf '%s\n' 'Native CPU regressions passed. MPS is built; GPU kernels and generation were not executed.' >> dist/build-provenance.txt

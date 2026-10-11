@@ -470,17 +470,20 @@ else:
                 with self.subTest(legacy=legacy, failed=failed, completed=completed):
                     self.run_isolated(f'''
 record = torch.ops.profiler.{'_record_function_enter' if legacy else '_record_function_enter_new'}("security-regression", None)
-future = torch.futures.Future()
+source = torch.futures.Future()
+future = source.then(lambda done: done.wait())
 if {completed!r}:
     if {failed!r}:
-        future.set_exception(ValueError("original failure"))
+        source.set_exception(ValueError("original failure"))
     else:
-        future.set_result(19)
+        source.set_result(19)
 result = torch.ops.profiler._call_end_callbacks_on_jit_fut{'' if legacy else '._RecordFunction'}(record, future)
 del record
+if not {completed!r}:
+    assert not result.done(), "pending future completed early"
 if {failed!r}:
     if not {completed!r}:
-        future.set_exception(ValueError("original failure"))
+        source.set_exception(ValueError("original failure"))
     try:
         result.wait()
     except (ValueError, RuntimeError) as error:
@@ -489,8 +492,22 @@ if {failed!r}:
         raise AssertionError("future failure lost")
 else:
     if not {completed!r}:
-        future.set_result(19)
+        source.set_result(19)
     assert result.wait() == 19
+''')
+
+    def test_profiler_future_preserves_exception_objects_as_values(self):
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                self.run_isolated(f'''
+record = torch.ops.profiler.{'_record_function_enter' if legacy else '_record_function_enter_new'}("security-regression", None)
+future = torch.futures.Future()
+future.set_result(ValueError("exception payload"))
+result = torch.ops.profiler._call_end_callbacks_on_jit_fut{'' if legacy else '._RecordFunction'}(record, future)
+del record
+value = result.wait()
+assert isinstance(value, ValueError)
+assert str(value) == "exception payload"
 ''')
 
 

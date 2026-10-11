@@ -103,3 +103,12 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           compression-level: 0
+      - name: Preserve unverified build diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: unverified-torch-cu121-${{ github.sha }}-stage-${{ inputs.stage }}
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0

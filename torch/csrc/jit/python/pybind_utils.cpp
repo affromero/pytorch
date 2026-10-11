@@ -504,7 +504,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return IValue::make_capsule(py::cast<c10::Capsule>(obj).obj_ptr);
     }
     case TypeKind::FutureType: {
-      return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
+      auto wrapper = obj.cast<std::shared_ptr<PythonFutureWrapper>>();
+      TORCH_CHECK(wrapper && wrapper->fut, "Expected a non-null Future");
+      return wrapper->fut;
     }
     case TypeKind::AwaitType: {
       return obj.cast<std::shared_ptr<PythonAwaitWrapper>>()->aw_;

@@ -74,6 +74,12 @@ auditwheel repair dist/torch-*.whl --plat manylinux_2_35_x86_64 \
   --wheel-dir repaired
 rm dist/torch-*.whl
 mv repaired/*.whl dist/
+{
+  git rev-parse HEAD
+  nvcc --version
+  python --version
+} > dist/build-provenance.txt
+sha256sum dist/*.whl > dist/SHA256SUMS
 
 test_env=/tmp/torch-security-wheel-test
 mkdir -p "$test_env"
@@ -102,10 +108,4 @@ print(torch.__config__.show())
 PY
 "$test_env/.venv/bin/python" "$source_root/test/test_security_backports.py" -v 2>&1 | tee "$source_root/dist/native-regressions.log"
 cd "$source_root"
-{
-  git rev-parse HEAD
-  nvcc --version
-  python --version
-  printf '%s\n' 'CPU regressions passed. GPU kernel execution and generation were not tested.'
-} > dist/build-provenance.txt
-sha256sum dist/*.whl > dist/SHA256SUMS
+printf '%s\n' 'CPU regressions passed. GPU kernel execution and generation were not tested.' >> dist/build-provenance.txt
