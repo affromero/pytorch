@@ -78,6 +78,7 @@ jobs:
           sha256sum dist/*.whl > dist/SHA256SUMS
       - name: Verify native regressions alongside system CUDA libraries
         run: |
+          set -euo pipefail
           docker run --rm \
             --volume "$PWD/dist:/wheelhouse:ro" \
             --volume "$PWD/test/test_security_backports.py:/regressions.py:ro" \
@@ -87,6 +88,7 @@ jobs:
             "$CUDA_IMAGE" env -u LD_LIBRARY_PATH bash /test-wheel.sh 2>&1 | tee dist/native-regressions.log
       - name: Verify relocation in a separate Ubuntu runtime
         run: |
+          set -euo pipefail
           docker run --rm \
             --volume "$PWD/dist:/wheelhouse:ro" \
             --volume "$PWD/test/test_security_backports.py:/regressions.py:ro" \
@@ -96,6 +98,18 @@ jobs:
             ubuntu:22.04 env -u LD_LIBRARY_PATH bash /test-wheel.sh 2>&1 | tee dist/clean-runtime-regressions.log
           printf '%s\n' 'Both runtime environments passed native CPU regressions. GPU kernels and generation were not executed.' >> dist/build-provenance.txt
           sha256sum --check dist/SHA256SUMS
+      - name: Verify Splattie's CUDA extension ABI without a GPU
+        run: |
+          set -euo pipefail
+          wheel_path=$(realpath dist/torch-*.whl)
+          wheel_sha=$(sha256sum "$wheel_path" | cut -d ' ' -f 1)
+          docker run --rm \
+            --volume "$PWD/dist:/wheelhouse:ro" \
+            --volume "$PWD/tools/security/test-splattie-abi.sh:/test-splattie-abi.sh:ro" \
+            "$CUDA_IMAGE" env -u LD_LIBRARY_PATH bash /test-splattie-abi.sh \
+            "/wheelhouse/$(basename "$wheel_path")" "$wheel_sha" "$NATIVE_SOURCE_REVISION" \
+            2>&1 | tee dist/extension-abi.log
+          printf '%s\n' 'TorchVision, torch-scatter, Kaolin, FlashAttention and xformers native libraries loaded; CPU NMS, scatter and mesh containment passed.' >> dist/build-provenance.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: torch-cu121-repaired-security-${{ env.NATIVE_SOURCE_REVISION }}-packaging-${{ github.sha }}
