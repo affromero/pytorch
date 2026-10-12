@@ -52,7 +52,9 @@ Native source builds use `2.3.0+security.1`. The source metadata can be resolved
 without compiling Torch, and isolated builds pin the tested NumPy and build
 tool versions. The Linux CUDA wheel retains its explicit version override.
 Windows source builds require MSVC, CUDA 12.1 and cuDNN 8.9.2 and fail if CMake
-disables CUDA or cuDNN. Native macOS and Windows builds remain unverified.
+disables CUDA or cuDNN. Native Windows builds remain unverified.
+The native macOS ARM64 wheel passed 37 CPU regressions, with two MKLDNN tests
+skipped. It requires macOS 15 or later and retains compiled MPS support.
 The manual macOS ARM64 workflow builds with Xcode 16.4, repairs external
 libraries, checks the resulting deployment target and runs the canonical CPU
 regressions in a separate runtime environment. MPS must remain built, but its
@@ -123,6 +125,14 @@ against the resulting wheel. A separate runtime container verifies package
 relocation and declared NVIDIA dependencies. No GPU is available for kernel
 execution or generation validation; a successful build does not establish
 those results. Build artifacts include their source revision and SHA-256.
+
+The verified Linux wheel passed all 39 native CPU regressions in both a CUDA
+development image and a separate Ubuntu runtime. TorchVision, torch-scatter,
+Kaolin, FlashAttention and xformers native libraries loaded; CPU NMS, scatter
+maxima and mesh containment passed. The packaging repair uses portable ELF
+paths to the declared NVIDIA dependencies, preserves every compiled program
+and data section, and regenerates wheel RECORD hashes. Its provenance records
+the native source revision and the separate packaging revision.
 
 The resumable workflow checkpoints an interrupted compile after three hours.
 It preserves the source timestamps, Ninja state, and complete Docker build
