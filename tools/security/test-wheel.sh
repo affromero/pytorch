@@ -18,10 +18,13 @@ torch = { path = "$wheel_path" }
 TOML
 uv sync --python 3.11.15
 .venv/bin/python - <<'PY'
+import os
 import pathlib
 import subprocess
 import torch
 assert torch.__version__ == "2.3.0+cu121.security1", torch.__version__
+if os.environ.get("EXPECTED_SOURCE_REVISION"):
+    assert torch.version.git_version == os.environ["EXPECTED_SOURCE_REVISION"], torch.version.git_version
 assert torch.version.cuda == "12.1", torch.version.cuda
 assert torch.backends.cudnn.version() == 8902
 assert torch.backends.mkldnn.is_available()
@@ -32,7 +35,8 @@ for library in (pathlib.Path(torch.__file__).parent / "lib").glob("*.so*"):
     for line in result.stdout.splitlines():
         if "RPATH" in line or "RUNPATH" in line:
             print(library.name, line)
-            assert "/tmp/torch-security-build" not in line, line
+            paths = line.split("[", 1)[1].split("]", 1)[0].split(":")
+            assert all(path.startswith(("$ORIGIN", "${ORIGIN}")) for path in paths), line
 print(torch.__config__.show())
 PY
 .venv/bin/python /regressions.py -v

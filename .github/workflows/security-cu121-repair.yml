@@ -1,0 +1,114 @@
+name: Verify portable CUDA 12.1 security wheel
+on:
+  workflow_dispatch:
+  push:
+    branches: [security/cu121-backports]
+    paths:
+      - tools/security/repair_cuda_wheel.py
+      - .github/workflows/security-cu121-repair.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  repair-and-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      NATIVE_SOURCE_REVISION: 1bb7c43f24b73280de6e3734cd3a51d3c35c6216
+      CUDA_IMAGE: nvidia/cuda:12.1.1-devel-ubuntu22.04@sha256:327c9e046fbf662275be0934742f7e5412f9b24402ee90bf4d649c1a21707912
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+      - name: Authenticate the compiled wheel and its source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_REPOSITORY" = affromero/pytorch
+          git diff --exit-code "$NATIVE_SOURCE_REVISION" -- test/test_security_backports.py
+          gh api repos/affromero/pytorch/actions/runs/38169451857 > "$RUNNER_TEMP/native-run.json"
+          jq --exit-status --arg sha "$NATIVE_SOURCE_REVISION" '
+            .head_sha == $sha and .repository.full_name == "affromero/pytorch" and
+            .head_branch == "security/cu121-backports" and
+            .path == ".github/workflows/security-cu121-resumable.yml"
+          ' "$RUNNER_TEMP/native-run.json"
+          gh api repos/affromero/pytorch/actions/artifacts/11719602467 > "$RUNNER_TEMP/native-artifact.json"
+          jq --exit-status --arg sha "$NATIVE_SOURCE_REVISION" '
+            .id == 11719602467 and .expired == false and
+            .name == ("unverified-torch-cu121-" + $sha + "-stage-2") and
+            .workflow_run.id == 38169451857 and .workflow_run.head_sha == $sha and
+            .digest == "sha256:8e4334472f87930d8990f56ebae472efc06f641dbd13372d40fc06921ed46b79"
+          ' "$RUNNER_TEMP/native-artifact.json"
+          gh api repos/affromero/pytorch/actions/artifacts/11719602467/zip > "$RUNNER_TEMP/native-wheel.zip"
+          printf '%s  %s\n' 8e4334472f87930d8990f56ebae472efc06f641dbd13372d40fc06921ed46b79 "$RUNNER_TEMP/native-wheel.zip" | sha256sum --check
+          mkdir -p input/dist
+          python3 - "$RUNNER_TEMP/native-wheel.zip" <<'PY'
+          import stat
+          import sys
+          import zipfile
+          expected = {"SHA256SUMS", "build-provenance.txt", "torch-2.3.0+cu121.security1-cp311-cp311-manylinux_2_35_x86_64.whl"}
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              entries = archive.infolist()
+              if len(entries) != len(expected) or {entry.filename for entry in entries} != expected:
+                  raise ValueError("Unexpected compiled artifact entries")
+              if any(stat.S_ISLNK(entry.external_attr >> 16) for entry in entries):
+                  raise ValueError("Compiled artifact contains a symbolic link")
+              archive.extractall("input/dist")
+          PY
+          (cd input && sha256sum --check dist/SHA256SUMS)
+          test "$(head -1 input/dist/build-provenance.txt)" = "$NATIVE_SOURCE_REVISION"
+      - name: Repair ELF paths without changing compiled program sections
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends patchelf
+          mkdir "$RUNNER_TEMP/repair-environment"
+          cat > "$RUNNER_TEMP/repair-environment/pyproject.toml" <<'TOML'
+          [project]
+          name = "torch-wheel-repair"
+          version = "0.0.0"
+          requires-python = ">=3.11,<3.12"
+          dependencies = ["wheel==0.46.2"]
+          TOML
+          uv sync --project "$RUNNER_TEMP/repair-environment" --python 3.11.15
+          "$RUNNER_TEMP/repair-environment/.venv/bin/python" tools/security/repair_cuda_wheel.py input/dist/*.whl dist
+          cp input/dist/build-provenance.txt dist/build-provenance.txt
+          printf 'Packaging revision: %s\nNative program/data sections are unchanged; portable ELF RPATH and RECORD were repaired.\n' "$GITHUB_SHA" >> dist/build-provenance.txt
+          sha256sum dist/*.whl > dist/SHA256SUMS
+      - name: Verify native regressions alongside system CUDA libraries
+        run: |
+          docker run --rm \
+            --volume "$PWD/dist:/wheelhouse:ro" \
+            --volume "$PWD/test/test_security_backports.py:/regressions.py:ro" \
+            --volume "$PWD/tools/security/test-wheel.sh:/test-wheel.sh:ro" \
+            --volume "$(command -v uv):/usr/local/bin/uv:ro" \
+            --env EXPECTED_SOURCE_REVISION="$NATIVE_SOURCE_REVISION" \
+            "$CUDA_IMAGE" env -u LD_LIBRARY_PATH bash /test-wheel.sh 2>&1 | tee dist/native-regressions.log
+      - name: Verify relocation in a separate Ubuntu runtime
+        run: |
+          docker run --rm \
+            --volume "$PWD/dist:/wheelhouse:ro" \
+            --volume "$PWD/test/test_security_backports.py:/regressions.py:ro" \
+            --volume "$PWD/tools/security/test-wheel.sh:/test-wheel.sh:ro" \
+            --volume "$(command -v uv):/usr/local/bin/uv:ro" \
+            --env EXPECTED_SOURCE_REVISION="$NATIVE_SOURCE_REVISION" \
+            ubuntu:22.04 env -u LD_LIBRARY_PATH bash /test-wheel.sh 2>&1 | tee dist/clean-runtime-regressions.log
+          printf '%s\n' 'Both runtime environments passed native CPU regressions. GPU kernels and generation were not executed.' >> dist/build-provenance.txt
+          sha256sum --check dist/SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: torch-cu121-repaired-security-${{ env.NATIVE_SOURCE_REVISION }}-packaging-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - name: Preserve unverified repair diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: unverified-torch-cu121-repair-${{ github.sha }}
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0

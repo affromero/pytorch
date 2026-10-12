@@ -74,6 +74,9 @@ auditwheel repair dist/torch-*.whl --plat manylinux_2_35_x86_64 \
   --wheel-dir repaired
 rm dist/torch-*.whl
 mv repaired/*.whl dist/
+python tools/security/repair_cuda_wheel.py "$(realpath dist/torch-*.whl)" portable
+rm dist/torch-*.whl
+mv portable/*.whl portable/wheel-repair.json dist/
 {
   git rev-parse HEAD
   nvcc --version
